@@ -6,6 +6,10 @@ const Hittable = rtw.Hittable;
 const HittableList = rtw.HittableList;
 const Sphere = rtw.Sphere;
 const Camera = cam.Camera;
+const lambertian = @import("lambertian.zig");
+const material = @import("material.zig");
+const metal = @import("metal.zig");
+const color = @import("color.zig");
 
 pub fn main(init: std.process.Init) !void {
     // World: a small sphere floating at z=-1 (in front of the camera, which
@@ -13,13 +17,59 @@ pub fn main(init: std.process.Init) !void {
     // it that's so large its curvature reads as a flat ground plane.
     var world = HittableList.init(init.gpa);
     defer world.deinit();
-    try world.add(Hittable{ .sphere = Sphere{
-        .center = Point{ .x = 0, .y = 0, .z = -1 },
-        .radius = 0.5,
-    } });
+
+    const material_ground = material.Material{ .lambertian = lambertian.Lambertian{
+        .albedo = color.Color{
+            .x = 0.8,
+            .y = 0.8,
+            .z = 0,
+        },
+    } };
+    const material_center = material.Material{ .lambertian = lambertian.Lambertian{
+        .albedo = color.Color{
+            .x = 0.1,
+            .y = 0.2,
+            .z = 0.5,
+        },
+    } };
+
+    const material_left = material.Material{ .metal = metal.Metal{
+        .albedo = color.Color{
+            .x = 0.8,
+            .y = 0.8,
+            .z = 0.8,
+        },
+        .fuzz = 0.3,
+    } };
+    const material_right = material.Material{ .metal = metal.Metal{
+        .albedo = color.Color{
+            .x = 0.8,
+            .y = 0.6,
+            .z = 0.2,
+        },
+        .fuzz = 1.0,
+    } };
+
     try world.add(Hittable{ .sphere = Sphere{
         .center = Point{ .x = 0, .y = -100.5, .z = -1 },
         .radius = 100,
+        .mat = material_ground,
+    } });
+    try world.add(Hittable{ .sphere = Sphere{
+        .center = Point{ .x = 0, .y = 0, .z = -1.2 },
+        .radius = 0.5,
+        .mat = material_center,
+    } });
+
+    try world.add(Hittable{ .sphere = Sphere{
+        .center = Point{ .x = -1, .y = 0, .z = -1 },
+        .radius = 0.5,
+        .mat = material_left,
+    } });
+    try world.add(Hittable{ .sphere = Sphere{
+        .center = Point{ .x = 1, .y = 0, .z = -1 },
+        .radius = 0.5,
+        .mat = material_right,
     } });
 
     // Buffered writers for the image (stdout, PPM pixel data) and progress

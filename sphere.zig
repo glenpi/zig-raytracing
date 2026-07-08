@@ -6,10 +6,12 @@ const Point = v.Point;
 const HitRecord = hittable.HitRecord;
 const Ray = r.Ray;
 const Interval = interval.Interval;
+const material = @import("material.zig");
 
 pub const Sphere = struct {
     center: Point,
     radius: f64,
+    mat: material.Material,
 
     // Ray-sphere intersection. A point P is on the sphere when
     // |P - center|^2 = radius^2. Substituting the ray's P(t) = origin + t*dir
@@ -50,6 +52,7 @@ pub const Sphere = struct {
         // divide by radius).
         const outward_normal = (rec.p.subtract(self.center)).divide(self.radius);
         rec.setFaceNormal(ray, outward_normal);
+        rec.mat = self.mat;
         return true;
     }
 };

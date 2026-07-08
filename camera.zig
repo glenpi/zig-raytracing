@@ -120,14 +120,16 @@ pub const Camera = struct {
         // in rec.p can otherwise make the bounced ray re-hit the same
         // surface at t ~ 0, which without a depth cap recurses forever.
         if (world.hit(ray, Interval{ .min = 0.001, .max = rtw.infinity }, &rec)) {
-            // Debug/placeholder shading: map each normal component from
-            // [-1, 1] to a color component in [0, 1] so surface normals are
-            // visible as colors (no real lighting model yet).
-            const direction = rec.normal.add(Vec3.randomUnitVector());
-            return rayColor(Ray{
-                .origin = rec.p,
-                .direction = direction,
-            }, depth - 1, world).multiply(0.1);
+            var scattered: Ray = undefined;
+            var attenuation: Color = undefined;
+            if (rec.mat.scatter(ray, rec, &attenuation, &scattered)) {
+                return attenuation.hadamardProduct(rayColor(scattered, depth - 1, world));
+            }
+            return Color{
+                .x = 0,
+                .y = 0,
+                .z = 0,
+            };
         }
         // Background gradient: blend white -> light blue based on the ray's
         // y-direction, so straight-down rays are white and straight-up rays

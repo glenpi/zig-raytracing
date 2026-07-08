@@ -7,6 +7,7 @@ const Point = v.Point;
 const Vec3 = v.Vec3;
 const Sphere = s.Sphere;
 const Interval = interval.Interval;
+const material = @import("material.zig");
 
 // Filled in by a Hittable's hit() when a ray intersects it: where the hit
 // happened (`p`), the surface normal there, the ray parameter `t` at the
@@ -14,6 +15,7 @@ const Interval = interval.Interval;
 pub const HitRecord = struct {
     p: Point,
     normal: Vec3,
+    mat: material.Material,
     t: f64,
     front_face: bool,
 
