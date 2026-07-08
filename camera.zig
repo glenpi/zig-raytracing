@@ -1,21 +1,12 @@
 const std = @import("std");
-const h = @import("hittable.zig");
-const hl = @import("hittable_list.zig");
-const r = @import("ray.zig");
-const c = @import("color.zig");
+const hittable = @import("hittable.zig");
+const hittable_list = @import("hittable_list.zig");
+const ray = @import("ray.zig");
+const color = @import("color.zig");
 const interval = @import("interval.zig");
 const vec3 = @import("vec3.zig");
-const rtw = @import("rtweekend.zig");
+const rtweekend = @import("rtweekend.zig");
 const util = @import("util.zig");
-
-const Ray = r.Ray;
-const Hittable = h.Hittable;
-const HittableList = hl.HittableList;
-const Color = c.Color;
-const HitRecord = h.HitRecord;
-const Interval = interval.Interval;
-const Point = vec3.Point;
-const Vec3 = vec3.Vec3;
 
 pub const Camera = struct {
     // --- Public configuration, set by the caller (see main.zig) before render() ---
@@ -27,10 +18,10 @@ pub const Camera = struct {
 
     // --- Derived state, computed by initialize() from the config above ---
     image_height: u32 = 0,
-    center: Point = Point{}, // camera/eye position, at the origin
-    pixel00_loc: Point = Point{}, // world-space location of pixel (0,0)'s center
-    pixel_delta_u: Vec3 = Vec3{}, // world-space offset from one pixel to the next, horizontally
-    pixel_delta_v: Vec3 = Vec3{}, // world-space offset from one pixel to the next, vertically
+    center: vec3.Point = vec3.Point{}, // camera/eye position, at the origin
+    pixel00_loc: vec3.Point = vec3.Point{}, // world-space location of pixel (0,0)'s center
+    pixel_delta_u: vec3.Vec3 = vec3.Vec3{}, // world-space offset from one pixel to the next, horizontally
+    pixel_delta_v: vec3.Vec3 = vec3.Vec3{}, // world-space offset from one pixel to the next, vertically
 
     // Sets up the virtual "viewport": a rectangle one focal_length in front
     // of the camera, sized in world units (viewport_height/width), that maps
@@ -43,7 +34,7 @@ pub const Camera = struct {
 
         self.pixel_samples_scale = 1.0 / @as(f64, @floatFromInt(self.samples_per_pixel));
 
-        self.center = Point{};
+        self.center = vec3.Point{};
 
         const focal_length = 1.0;
         const viewport_height = 2.0;
@@ -55,8 +46,8 @@ pub const Camera = struct {
         // Vectors across the horizontal and down the vertical viewport edges.
         // viewport_v points -y (down) because image row 0 is the top of the
         // image but +y is "up" in world space.
-        const viewport_u = Vec3{ .x = viewport_width, .y = 0, .z = 0 };
-        const viewport_v = Vec3{ .x = 0, .y = -viewport_height, .z = 0 };
+        const viewport_u = vec3.Vec3{ .x = viewport_width, .y = 0, .z = 0 };
+        const viewport_v = vec3.Vec3{ .x = 0, .y = -viewport_height, .z = 0 };
 
         // Per-pixel step vectors: dividing the full viewport edge by the
         // pixel count gives the world-space distance between adjacent
@@ -68,7 +59,7 @@ pub const Camera = struct {
         // corner (forward by focal_length, then half the width left and
         // half the height up), then inset by half a pixel so pixel00_loc
         // lands on the *center* of the top-left pixel rather than its corner.
-        const viewport_upper_left = self.center.subtract(Vec3{ .x = 0, .y = 0, .z = focal_length }).subtract(viewport_u.divide(2.0)).subtract(viewport_v.divide(2.0));
+        const viewport_upper_left = self.center.subtract(vec3.Vec3{ .x = 0, .y = 0, .z = focal_length }).subtract(viewport_u.divide(2.0)).subtract(viewport_v.divide(2.0));
         self.pixel00_loc = viewport_upper_left.add((self.pixel_delta_u.add(self.pixel_delta_v)).multiply(0.5));
     }
 
@@ -77,7 +68,7 @@ pub const Camera = struct {
     // slightly jittered points within that pixel and averages the resulting
     // colors — this random supersampling is what smooths out jagged edges
     // (antialiasing) instead of every pixel being a single hard sample.
-    pub fn render(self: *Camera, world: HittableList, stdout: *std.Io.Writer, stderr: *std.Io.Writer) !void {
+    pub fn render(self: *Camera, world: hittable_list.HittableList, stdout: *std.Io.Writer, stderr: *std.Io.Writer) !void {
         self.initialize();
 
         try stdout.print("P3\n{} {}\n255\n", .{ self.image_width, self.image_height });
@@ -86,7 +77,7 @@ pub const Camera = struct {
             try stderr.print("\rScanlines remaining: {} ", .{self.image_height - j});
             try stderr.flush();
             for (0..self.image_width) |i| {
-                var pixel_color = Color{
+                var pixel_color = color.Color{
                     .x = 0,
                     .y = 0,
                     .z = 0,
@@ -97,7 +88,7 @@ pub const Camera = struct {
                 }
                 // Average the samples (multiply by 1/N) rather than sum them,
                 // so the final brightness doesn't scale with sample count.
-                try c.writeColor(stdout, pixel_color.multiply(self.pixel_samples_scale));
+                try color.writeColor(stdout, pixel_color.multiply(self.pixel_samples_scale));
             }
         }
         try stdout.flush();
@@ -110,44 +101,46 @@ pub const Camera = struct {
     // `depth` counts down remaining bounces; once it hits 0 we stop
     // recursing and contribute no more light, which both bounds the
     // recursion and models energy loss from repeated bounces.
-    fn rayColor(ray: Ray, depth: u32, world: HittableList) Color {
+    fn rayColor(r_in: ray.Ray, depth: u32, world: hittable_list.HittableList) color.Color {
         if (depth <= 0) {
-            return Color{ .x = 0, .y = 0, .z = 0 };
+            return color.Color{ .x = 0, .y = 0, .z = 0 };
         }
 
-        var rec: HitRecord = undefined;
+        var rec: hittable.HitRecord = undefined;
         // min = 0.001 (not 0) to avoid "shadow acne": floating-point error
         // in rec.p can otherwise make the bounced ray re-hit the same
         // surface at t ~ 0, which without a depth cap recurses forever.
-        if (world.hit(ray, Interval{ .min = 0.001, .max = rtw.infinity }, &rec)) {
-            // Debug/placeholder shading: map each normal component from
-            // [-1, 1] to a color component in [0, 1] so surface normals are
-            // visible as colors (no real lighting model yet).
-            const direction = rec.normal.add(Vec3.randomUnitVector());
-            return rayColor(Ray{
-                .origin = rec.p,
-                .direction = direction,
-            }, depth - 1, world).multiply(0.1);
+        if (world.hit(r_in, interval.Interval{ .min = 0.001, .max = rtweekend.infinity }, &rec)) {
+            var scattered: ray.Ray = undefined;
+            var attenuation: color.Color = undefined;
+            if (rec.mat.scatter(r_in, rec, &attenuation, &scattered)) {
+                return attenuation.hadamardProduct(rayColor(scattered, depth - 1, world));
+            }
+            return color.Color{
+                .x = 0,
+                .y = 0,
+                .z = 0,
+            };
         }
         // Background gradient: blend white -> light blue based on the ray's
         // y-direction, so straight-down rays are white and straight-up rays
         // are blue (`a` in [0,1] is a linear interpolation factor, i.e a
         // "lerp": unit_direction.y is in [-1, 1] so +1 then *0.5 remaps it
         // to [0, 1]).
-        const unit_direction = ray.direction.unitVector();
+        const unit_direction = r_in.direction.unitVector();
         const a = 0.5 * (unit_direction.y + 1.0);
-        return (Color{ .x = 1.0, .y = 1.0, .z = 1.0 }).multiply(1.0 - a).add((Color{ .x = 0.5, .y = 0.7, .z = 1.0 }).multiply(a));
+        return (color.Color{ .x = 1.0, .y = 1.0, .z = 1.0 }).multiply(1.0 - a).add((color.Color{ .x = 0.5, .y = 0.7, .z = 1.0 }).multiply(a));
     }
 
     // Builds a camera ray through pixel (i, j), offset by a random
     // sub-pixel jitter so repeated calls for the same pixel sample slightly
     // different points within it (see render()'s sample loop).
-    fn getRay(self: *Camera, i: u32, j: u32) Ray {
+    fn getRay(self: *Camera, i: u32, j: u32) ray.Ray {
         const offset = sampleSquare();
         const pixel_sample = self.pixel00_loc.add(self.pixel_delta_u.multiply(i + offset.x)).add(self.pixel_delta_v.multiply(j + offset.y));
         const ray_origin = self.center;
         const ray_direction = pixel_sample.subtract(ray_origin);
-        return Ray{
+        return ray.Ray{
             .origin = ray_origin,
             .direction = ray_direction,
         };
@@ -157,8 +150,8 @@ pub const Camera = struct {
     // within a unit square centered on the origin. Added to a pixel's own
     // (i, j) coordinates in getRay, this is what lets the sample land
     // anywhere within the pixel's footprint rather than always dead center.
-    fn sampleSquare() Vec3 {
-        return Vec3{
+    fn sampleSquare() vec3.Vec3 {
+        return vec3.Vec3{
             .x = util.randomDouble() - 0.5,
             .y = util.randomDouble() - 0.5,
             .z = 0,

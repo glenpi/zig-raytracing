@@ -1,19 +1,14 @@
 const std = @import("std");
-const h = @import("hittable.zig");
-const r = @import("ray.zig");
+const hittable = @import("hittable.zig");
+const ray = @import("ray.zig");
 const interval = @import("interval.zig");
-
-const Hittable = h.Hittable;
-const HitRecord = h.HitRecord;
-const Ray = r.Ray;
-const Interval = interval.Interval;
 
 // The "world": a flat, growable list of every Hittable object in the scene.
 // It is itself Hittable-shaped (has a `hit` method with the same signature)
 // so the camera can treat "the whole world" the same way it would treat a
 // single object.
 pub const HittableList = struct {
-    objects: std.ArrayList(Hittable),
+    objects: std.ArrayList(hittable.Hittable),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) HittableList {
@@ -28,7 +23,7 @@ pub const HittableList = struct {
         self.objects.clearRetainingCapacity();
     }
 
-    pub fn add(self: *HittableList, object: Hittable) !void {
+    pub fn add(self: *HittableList, object: hittable.Hittable) !void {
         try self.objects.append(self.allocator, object);
     }
 
@@ -38,13 +33,13 @@ pub const HittableList = struct {
     // object was hit at distance t, any further object must be hit even
     // closer than that to matter, so we never need to reconsider farther
     // hits.
-    pub fn hit(self: HittableList, ray: Ray, ray_t: Interval, rec: *HitRecord) bool {
-        var temp_rec: HitRecord = undefined;
+    pub fn hit(self: HittableList, r_in: ray.Ray, ray_t: interval.Interval, rec: *hittable.HitRecord) bool {
+        var temp_rec: hittable.HitRecord = undefined;
         var hit_anything = false;
         var closest_so_far = ray_t.max;
 
         for (self.objects.items) |object| {
-            if (object.hit(ray, Interval{ .min = ray_t.min, .max = closest_so_far }, &temp_rec)) {
+            if (object.hit(r_in, interval.Interval{ .min = ray_t.min, .max = closest_so_far }, &temp_rec)) {
                 hit_anything = true;
                 closest_so_far = temp_rec.t;
                 rec.* = temp_rec;

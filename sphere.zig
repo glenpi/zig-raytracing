@@ -1,15 +1,13 @@
-const v = @import("vec3.zig");
-const r = @import("ray.zig");
+const vec3 = @import("vec3.zig");
+const ray = @import("ray.zig");
 const interval = @import("interval.zig");
 const hittable = @import("hittable.zig");
-const Point = v.Point;
-const HitRecord = hittable.HitRecord;
-const Ray = r.Ray;
-const Interval = interval.Interval;
+const material = @import("material.zig");
 
 pub const Sphere = struct {
-    center: Point,
+    center: vec3.Point,
     radius: f64,
+    mat: material.Material,
 
     // Ray-sphere intersection. A point P is on the sphere when
     // |P - center|^2 = radius^2. Substituting the ray's P(t) = origin + t*dir
@@ -21,10 +19,10 @@ pub const Sphere = struct {
     //                                   instead of the textbook (-b +/- ...)/2a)
     //   c = |center - origin|^2 - radius^2
     // discriminant < 0 means the line never touches the sphere at all.
-    pub fn hit(self: Sphere, ray: Ray, ray_t: Interval, rec: *HitRecord) bool {
-        const oc = self.center.subtract(ray.origin);
-        const a = ray.direction.lengthSquared();
-        const h = ray.direction.dot(oc);
+    pub fn hit(self: Sphere, r_in: ray.Ray, ray_t: interval.Interval, rec: *hittable.HitRecord) bool {
+        const oc = self.center.subtract(r_in.origin);
+        const a = r_in.direction.lengthSquared();
+        const h = r_in.direction.dot(oc);
         const c = oc.lengthSquared() - self.radius * self.radius;
         const discriminant = h * h - a * c;
         if (discriminant < 0) {
@@ -44,12 +42,13 @@ pub const Sphere = struct {
             }
         }
         rec.t = root;
-        rec.p = ray.at(rec.t);
+        rec.p = r_in.at(rec.t);
         // For a sphere, the outward normal at a surface point is just the
         // direction from the center to that point (unit length since we
         // divide by radius).
         const outward_normal = (rec.p.subtract(self.center)).divide(self.radius);
-        rec.setFaceNormal(ray, outward_normal);
+        rec.setFaceNormal(r_in, outward_normal);
+        rec.mat = self.mat;
         return true;
     }
 };

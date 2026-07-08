@@ -13,6 +13,13 @@ pub const Vec3 = struct {
     pub fn multiply(self: Vec3, t: f64) Vec3 {
         return .{ .x = self.x * t, .y = self.y * t, .z = self.z * t };
     }
+    pub fn hadamardProduct(self: Vec3, other: Vec3) Vec3 {
+        return .{
+            .x = self.x * other.x,
+            .y = self.y * other.y,
+            .z = self.z * other.z,
+        };
+    }
     // Dot product: sum of componentwise products. Used to project one vector
     // onto another (e.g. checking whether a ray points into or out of a
     // surface in hittable.zig) and to compute squared length below.
@@ -79,6 +86,15 @@ pub const Vec3 = struct {
             .y = util.randomDoubleWithRange(min, max),
             .z = util.randomDoubleWithRange(min, max),
         };
+    }
+
+    pub fn nearZero(self: Vec3) bool {
+        const s = 1e-8;
+        return (@abs(self.x) < s) and (@abs(self.y) < s) and (@abs(self.z) < s);
+    }
+
+    pub fn reflect(v: Vec3, n: Vec3) Vec3 {
+        return v.subtract(n.multiply(v.dot(n)).multiply(2));
     }
 };
 

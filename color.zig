@@ -1,7 +1,6 @@
 const std = @import("std");
 const vec3 = @import("vec3.zig");
 const interval = @import("interval.zig");
-const Interval = interval.Interval;
 
 // A color is just a Vec3 whose x/y/z are read as r/g/b in [0, 1] (before
 // this file converts them to 0-255 bytes for the PPM image format).
@@ -13,7 +12,7 @@ pub const Color = vec3.Vec3;
 pub fn writeColor(writer: *std.Io.Writer, c: Color) !void {
     // Averaged/antialiased samples can slightly exceed 1.0; clamp to
     // [0, 0.999] so 255.999 * value never rounds up to 256.
-    const intensity = Interval{
+    const intensity = interval.Interval{
         .min = 0.0,
         .max = 0.999,
     };
