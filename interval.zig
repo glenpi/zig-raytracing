@@ -1,13 +1,13 @@
-const rtw = @import("rtweekend.zig");
+const rtweekend = @import("rtweekend.zig");
 
 // `empty`/`universe` deliberately invert min/max so that no real value ever
 // falls inside `empty` (min > max, so contains()/surrounds() are always
 // false), and every value falls inside `universe`.
-pub const empty = Interval{ .min = rtw.infinity, .max = -rtw.infinity };
+pub const empty = Interval{ .min = rtweekend.infinity, .max = -rtweekend.infinity };
 
 pub const universe = Interval{
-    .min = -rtw.infinity,
-    .max = rtw.infinity,
+    .min = -rtweekend.infinity,
+    .max = rtweekend.infinity,
 };
 
 // A closed range [min, max] of f64. Used two ways in this raytracer:
@@ -16,8 +16,8 @@ pub const universe = Interval{
 //    from a hit at t~0 and lets us track the closest hit so far.
 // 2. Clamping a color channel into [0, 1] before writing it out (color.zig).
 pub const Interval = struct {
-    min: f64 = rtw.infinity,
-    max: f64 = -rtw.infinity,
+    min: f64 = rtweekend.infinity,
+    max: f64 = -rtweekend.infinity,
 
     pub fn size(self: Interval) f64 {
         return self.max - self.min;
