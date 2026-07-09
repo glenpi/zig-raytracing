@@ -5,6 +5,7 @@ const lambertian = @import("lambertian.zig");
 const material = @import("material.zig");
 const metal = @import("metal.zig");
 const color = @import("color.zig");
+const dielectric = @import("dielectric.zig");
 
 pub fn main(init: std.process.Init) !void {
     // World: a small sphere floating at z=-1 (in front of the camera, which
@@ -28,14 +29,13 @@ pub fn main(init: std.process.Init) !void {
         },
     } };
 
-    const material_left = material.Material{ .metal = metal.Metal{
-        .albedo = color.Color{
-            .x = 0.8,
-            .y = 0.8,
-            .z = 0.8,
-        },
-        .fuzz = 0.3,
+    const material_left = material.Material{ .dielectric = dielectric.Dielectric{
+        .refraction_index = 1.5,
     } };
+    const material_bubble = material.Material{ .dielectric = dielectric.Dielectric{
+        .refraction_index = 1.0 / 1.5,
+    } };
+
     const material_right = material.Material{ .metal = metal.Metal{
         .albedo = color.Color{
             .x = 0.8,
@@ -60,6 +60,12 @@ pub fn main(init: std.process.Init) !void {
         .center = rtweekend.Point{ .x = -1, .y = 0, .z = -1 },
         .radius = 0.5,
         .mat = material_left,
+    } });
+
+    try world.add(rtweekend.Hittable{ .sphere = rtweekend.Sphere{
+        .center = rtweekend.Point{ .x = -1, .y = 0, .z = -1 },
+        .radius = 0.4,
+        .mat = material_bubble,
     } });
     try world.add(rtweekend.Hittable{ .sphere = rtweekend.Sphere{
         .center = rtweekend.Point{ .x = 1, .y = 0, .z = -1 },
