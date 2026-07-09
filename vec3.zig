@@ -96,6 +96,13 @@ pub const Vec3 = struct {
     pub fn reflect(v: Vec3, n: Vec3) Vec3 {
         return v.subtract(n.multiply(v.dot(n)).multiply(2));
     }
+
+    pub fn refract(uv: Vec3, n: Vec3, etai_over_etat: f64) Vec3 {
+        const cos_theta = @min(uv.neg().dot(n), 1.0);
+        const r_out_prep = uv.add(n.multiply(cos_theta)).multiply(etai_over_etat);
+        const r_out_parallel = n.multiply(-@sqrt(@abs(1 - r_out_prep.lengthSquared())));
+        return r_out_prep.add(r_out_parallel);
+    }
 };
 
 // `Point` is just `Vec3` under a different name so code reads naturally
