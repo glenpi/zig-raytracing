@@ -6,6 +6,7 @@ const material = @import("material.zig");
 const metal = @import("metal.zig");
 const color = @import("color.zig");
 const dielectric = @import("dielectric.zig");
+const vec3 = @import("vec3.zig");
 
 pub fn main(init: std.process.Init) !void {
     // World: a small sphere floating at z=-1 (in front of the camera, which
@@ -14,42 +15,38 @@ pub fn main(init: std.process.Init) !void {
     var world = rtweekend.HittableList.init(init.gpa);
     defer world.deinit();
 
-    const material_ground = material.Material{ .lambertian = lambertian.Lambertian{
-        .albedo = color.Color{
-            .x = 0.8,
-            .y = 0.8,
-            .z = 0,
-        },
-    } };
-    const material_center = material.Material{ .lambertian = lambertian.Lambertian{
-        .albedo = color.Color{
+    //const R = std.math.cos(rtweekend.pi / 4);
+
+    const material_ground = material.Material{ .lambertian = lambertian.Lambertian{ .albedo = color.Color{
+        .x = 0.8,
+        .y = 0.8,
+        .z = 0,
+    } } };
+
+    const material_center =
+        material.Material{ .lambertian = lambertian.Lambertian{ .albedo = color.Color{
             .x = 0.1,
             .y = 0.2,
             .z = 0.5,
-        },
-    } };
+        } } };
 
-    const material_left = material.Material{ .dielectric = dielectric.Dielectric{
-        .refraction_index = 1.5,
-    } };
-    const material_bubble = material.Material{ .dielectric = dielectric.Dielectric{
-        .refraction_index = 1.0 / 1.5,
-    } };
+    const material_left = material.Material{ .dielectric = dielectric.Dielectric{ .refraction_index = 1.5 } };
 
-    const material_right = material.Material{ .metal = metal.Metal{
-        .albedo = color.Color{
-            .x = 0.8,
-            .y = 0.6,
-            .z = 0.2,
-        },
-        .fuzz = 1.0,
-    } };
+    const material_bubble =
+        material.Material{ .dielectric = dielectric.Dielectric{ .refraction_index = 1.0 / 1.5 } };
+
+    const material_right = material.Material{ .metal = metal.Metal{ .albedo = color.Color{
+        .x = 0.8,
+        .y = 0.6,
+        .z = 0.2,
+    }, .fuzz = 1.0 } };
 
     try world.add(rtweekend.Hittable{ .sphere = rtweekend.Sphere{
         .center = rtweekend.Point{ .x = 0, .y = -100.5, .z = -1 },
         .radius = 100,
         .mat = material_ground,
     } });
+
     try world.add(rtweekend.Hittable{ .sphere = rtweekend.Sphere{
         .center = rtweekend.Point{ .x = 0, .y = 0, .z = -1.2 },
         .radius = 0.5,
@@ -57,7 +54,7 @@ pub fn main(init: std.process.Init) !void {
     } });
 
     try world.add(rtweekend.Hittable{ .sphere = rtweekend.Sphere{
-        .center = rtweekend.Point{ .x = -1, .y = 0, .z = -1 },
+        .center = rtweekend.Point{ .x = -1, .y = 0.0, .z = -1 },
         .radius = 0.5,
         .mat = material_left,
     } });
@@ -67,6 +64,7 @@ pub fn main(init: std.process.Init) !void {
         .radius = 0.4,
         .mat = material_bubble,
     } });
+
     try world.add(rtweekend.Hittable{ .sphere = rtweekend.Sphere{
         .center = rtweekend.Point{ .x = 1, .y = 0, .z = -1 },
         .radius = 0.5,
@@ -88,6 +86,24 @@ pub fn main(init: std.process.Init) !void {
         .image_width = 400,
         .samples_per_pixel = 100, // rays averaged per pixel for antialiasing
         .max_depth = 50,
+        .vfov = 90,
+        .lookfrom = vec3.Point{
+            .x = -2,
+            .y = 2,
+            .z = 1,
+        },
+        .lookat = vec3.Point{
+            .x = 0,
+            .y = 0,
+            .z = -1,
+        },
+        .vup = vec3.Vec3{
+            .x = 0,
+            .y = 1,
+            .z = 0,
+        },
+        .defocus_angle = 10.0,
+        .focus_dist = 3.4,
     };
 
     try cam.render(world, stdout, stderr);

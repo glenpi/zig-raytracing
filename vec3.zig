@@ -26,6 +26,14 @@ pub const Vec3 = struct {
     pub fn dot(self: Vec3, other: Vec3) f64 {
         return self.x * other.x + self.y * other.y + self.z * other.z;
     }
+    pub fn cross(u: Vec3, v: Vec3) Vec3 {
+        return .{
+            .x = u.y * v.z - u.z * v.y,
+            .y = u.z * v.x - u.x * v.z,
+            .z = u.x * v.y - u.y * v.x,
+        };
+    }
+
     pub fn subtract(self: Vec3, other: Vec3) Vec3 {
         return .{ .x = self.x - other.x, .y = self.y - other.y, .z = self.z - other.z };
     }
@@ -51,6 +59,19 @@ pub const Vec3 = struct {
     // of a vector, e.g. the background gradient in camera.zig.
     pub fn unitVector(self: Vec3) Vec3 {
         return self.divide(self.length());
+    }
+
+    pub fn randomInUnitDisk() Vec3 {
+        while (true) {
+            const p = Vec3{
+                .x = util.randomDoubleWithRange(-1, 1),
+                .y = util.randomDoubleWithRange(-1, 1),
+                .z = 0,
+            };
+            if (p.lengthSquared() < 1) {
+                return p;
+            }
+        }
     }
 
     pub fn randomUnitVector() Vec3 {
