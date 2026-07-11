@@ -5,9 +5,12 @@ const ray = @import("ray.zig");
 const color = @import("color.zig");
 const interval = @import("interval.zig");
 const vec3 = @import("vec3.zig");
-const rtweekend = @import("rtweekend.zig");
 const util = @import("util.zig");
 
+// Owns the viewport/basis-vector setup and the top-level render loop: for
+// every pixel, fires several randomly-jittered rays (antialiasing) through
+// the world and averages what they see. Configure the public fields, then
+// call render() — initialize() runs automatically as render()'s first step.
 pub const Camera = struct {
     // --- Public configuration, set by the caller (see main.zig) before render() ---
     aspect_ratio: f64 = 1.0,
@@ -22,30 +25,32 @@ pub const Camera = struct {
     pixel00_loc: vec3.Point = vec3.Point{}, // world-space location of pixel (0,0)'s center
     pixel_delta_u: vec3.Vec3 = vec3.Vec3{}, // world-space offset from one pixel to the next, horizontally
     pixel_delta_v: vec3.Vec3 = vec3.Vec3{}, // world-space offset from one pixel to the next, vertically
+    // Camera-space basis vectors (u = right, v = up, w = backward, i.e.
+    // pointing from lookat toward lookfrom), derived from lookfrom/lookat/vup.
     u: vec3.Vec3 = vec3.Vec3{},
     v: vec3.Vec3 = vec3.Vec3{},
     w: vec3.Vec3 = vec3.Vec3{},
-    //
-    vfov: f64 = 90,
 
-    lookfrom: vec3.Point = vec3.Vec3{
+    vfov: f64 = 90, // vertical field of view, in degrees
+
+    lookfrom: vec3.Point = vec3.Point{
         .x = 0,
         .y = 0,
         .z = 0,
     },
-    lookat: vec3.Vec3 = vec3.Point{
+    lookat: vec3.Point = vec3.Point{
         .x = 0,
         .y = 0,
         .z = -1,
     },
-    vup: vec3.Vec3 = vec3.Vec3{
+    vup: vec3.Vec3 = vec3.Vec3{ // "view up": world-space direction treated as up, used to derive u/v/w
         .x = 0,
         .y = 1,
         .z = 0,
     },
 
-    defocus_angle: f64 = 0,
-    focus_dist: f64 = 10,
+    defocus_angle: f64 = 0, // full angle (degrees) of the defocus (depth-of-field) disk; 0 = pinhole, no blur
+    focus_dist: f64 = 10, // distance from the camera at which objects are perfectly in focus
     defocus_disk_u: vec3.Vec3 = vec3.Vec3{},
     defocus_disk_v: vec3.Vec3 = vec3.Vec3{},
 
@@ -62,7 +67,7 @@ pub const Camera = struct {
 
         self.center = self.lookfrom;
 
-        const theta = rtweekend.degreesToRadians(self.vfov);
+        const theta = util.degreesToRadians(self.vfov);
         const h = std.math.tan(theta / 2);
         const viewport_height = 2 * h * self.focus_dist;
         // Recompute width from the *actual* image_height (which was rounded
@@ -93,7 +98,7 @@ pub const Camera = struct {
         const viewport_upper_left = self.center.subtract(self.w.multiply(self.focus_dist)).subtract(viewport_u.divide(2.0)).subtract(viewport_v.divide(2.0));
         self.pixel00_loc = viewport_upper_left.add((self.pixel_delta_u.add(self.pixel_delta_v)).multiply(0.5));
 
-        const defocus_radius = self.focus_dist * std.math.tan(rtweekend.degreesToRadians(self.defocus_angle / 2));
+        const defocus_radius = self.focus_dist * std.math.tan(util.degreesToRadians(self.defocus_angle / 2));
         self.defocus_disk_u = self.u.multiply(defocus_radius);
         self.defocus_disk_v = self.v.multiply(defocus_radius);
     }
@@ -145,7 +150,7 @@ pub const Camera = struct {
         // min = 0.001 (not 0) to avoid "shadow acne": floating-point error
         // in rec.p can otherwise make the bounced ray re-hit the same
         // surface at t ~ 0, which without a depth cap recurses forever.
-        if (world.hit(r_in, interval.Interval{ .min = 0.001, .max = rtweekend.infinity }, &rec)) {
+        if (world.hit(r_in, interval.Interval{ .min = 0.001, .max = std.math.inf(f64) }, &rec)) {
             var scattered: ray.Ray = undefined;
             var attenuation: color.Color = undefined;
             if (rec.mat.scatter(r_in, rec, &attenuation, &scattered)) {
@@ -184,6 +189,10 @@ pub const Camera = struct {
         };
     }
 
+    // Picks a random origin point on the camera's defocus disk (a circle of
+    // radius `defocus_radius` around `center`, in the camera's own u/v
+    // plane) instead of always firing from the exact camera center — this
+    // is what produces depth-of-field blur for anything not at focus_dist.
     fn defocusDiskSample(self: Camera) vec3.Point {
         const p = vec3.Vec3.randomInUnitDisk();
         return self.center.add(self.defocus_disk_u.multiply(p.x)).add(self.defocus_disk_v.multiply(p.y));
