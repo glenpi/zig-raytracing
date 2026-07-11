@@ -22,6 +22,32 @@ pub const Camera = struct {
     pixel00_loc: vec3.Point = vec3.Point{}, // world-space location of pixel (0,0)'s center
     pixel_delta_u: vec3.Vec3 = vec3.Vec3{}, // world-space offset from one pixel to the next, horizontally
     pixel_delta_v: vec3.Vec3 = vec3.Vec3{}, // world-space offset from one pixel to the next, vertically
+    u: vec3.Vec3 = vec3.Vec3{},
+    v: vec3.Vec3 = vec3.Vec3{},
+    w: vec3.Vec3 = vec3.Vec3{},
+    //
+    vfov: f64 = 90,
+
+    lookfrom: vec3.Point = vec3.Vec3{
+        .x = 0,
+        .y = 0,
+        .z = 0,
+    },
+    lookat: vec3.Vec3 = vec3.Point{
+        .x = 0,
+        .y = 0,
+        .z = -1,
+    },
+    vup: vec3.Vec3 = vec3.Vec3{
+        .x = 0,
+        .y = 1,
+        .z = 0,
+    },
+
+    defocus_angle: f64 = 0,
+    focus_dist: f64 = 10,
+    defocus_disk_u: vec3.Vec3 = vec3.Vec3{},
+    defocus_disk_v: vec3.Vec3 = vec3.Vec3{},
 
     // Sets up the virtual "viewport": a rectangle one focal_length in front
     // of the camera, sized in world units (viewport_height/width), that maps
@@ -34,20 +60,25 @@ pub const Camera = struct {
 
         self.pixel_samples_scale = 1.0 / @as(f64, @floatFromInt(self.samples_per_pixel));
 
-        self.center = vec3.Point{};
+        self.center = self.lookfrom;
 
-        const focal_length = 1.0;
-        const viewport_height = 2.0;
+        const theta = rtweekend.degreesToRadians(self.vfov);
+        const h = std.math.tan(theta / 2);
+        const viewport_height = 2 * h * self.focus_dist;
         // Recompute width from the *actual* image_height (which was rounded
         // to an integer) rather than reusing aspect_ratio directly, so the
         // viewport's aspect ratio matches the image's aspect ratio exactly.
         const viewport_width = viewport_height * (@as(f64, @floatFromInt(self.image_width)) / @as(f64, @floatFromInt(self.image_height)));
 
+        self.w = vec3.Vec3.unitVector(self.lookfrom.subtract(self.lookat));
+        self.u = vec3.Vec3.unitVector(vec3.Vec3.cross(self.vup, self.w));
+        self.v = vec3.Vec3.cross(self.w, self.u);
+
         // Vectors across the horizontal and down the vertical viewport edges.
         // viewport_v points -y (down) because image row 0 is the top of the
         // image but +y is "up" in world space.
-        const viewport_u = vec3.Vec3{ .x = viewport_width, .y = 0, .z = 0 };
-        const viewport_v = vec3.Vec3{ .x = 0, .y = -viewport_height, .z = 0 };
+        const viewport_u = self.u.multiply(viewport_width);
+        const viewport_v = self.v.neg().multiply(viewport_height);
 
         // Per-pixel step vectors: dividing the full viewport edge by the
         // pixel count gives the world-space distance between adjacent
@@ -59,8 +90,12 @@ pub const Camera = struct {
         // corner (forward by focal_length, then half the width left and
         // half the height up), then inset by half a pixel so pixel00_loc
         // lands on the *center* of the top-left pixel rather than its corner.
-        const viewport_upper_left = self.center.subtract(vec3.Vec3{ .x = 0, .y = 0, .z = focal_length }).subtract(viewport_u.divide(2.0)).subtract(viewport_v.divide(2.0));
+        const viewport_upper_left = self.center.subtract(self.w.multiply(self.focus_dist)).subtract(viewport_u.divide(2.0)).subtract(viewport_v.divide(2.0));
         self.pixel00_loc = viewport_upper_left.add((self.pixel_delta_u.add(self.pixel_delta_v)).multiply(0.5));
+
+        const defocus_radius = self.focus_dist * std.math.tan(rtweekend.degreesToRadians(self.defocus_angle / 2));
+        self.defocus_disk_u = self.u.multiply(defocus_radius);
+        self.defocus_disk_v = self.v.multiply(defocus_radius);
     }
 
     // Renders the whole image to `stdout` in PPM format, writing progress
@@ -138,12 +173,20 @@ pub const Camera = struct {
     fn getRay(self: *Camera, i: u32, j: u32) ray.Ray {
         const offset = sampleSquare();
         const pixel_sample = self.pixel00_loc.add(self.pixel_delta_u.multiply(i + offset.x)).add(self.pixel_delta_v.multiply(j + offset.y));
-        const ray_origin = self.center;
+        var ray_origin = self.center;
+        if (self.defocus_angle > 0) {
+            ray_origin = self.defocusDiskSample();
+        }
         const ray_direction = pixel_sample.subtract(ray_origin);
         return ray.Ray{
             .origin = ray_origin,
             .direction = ray_direction,
         };
+    }
+
+    fn defocusDiskSample(self: Camera) vec3.Point {
+        const p = vec3.Vec3.randomInUnitDisk();
+        return self.center.add(self.defocus_disk_u.multiply(p.x)).add(self.defocus_disk_v.multiply(p.y));
     }
 
     // A random offset in [-0.5, 0.5] x [-0.5, 0.5], i.e. a random point
