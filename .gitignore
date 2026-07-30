@@ -1,6 +1,4 @@
 .DS_Store
 *.ppm
-main
-main_test
 zig-out/
 .zig-cache/
