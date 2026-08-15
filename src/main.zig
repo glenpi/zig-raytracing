@@ -36,7 +36,7 @@ pub fn main(init: std.process.Init) !void {
         .focus_dist = 10.0,
     };
 
-    try cam.render(world, &stdout_writer.interface, &stderr_writer.interface);
+    try cam.render(init.io, init.gpa, world, &stdout_writer.interface, &stderr_writer.interface);
 }
 
 // The book's "final render" scene: a huge sphere for the ground, a randomly
