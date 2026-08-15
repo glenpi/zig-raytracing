@@ -94,32 +94,98 @@ pub const Camera = struct {
         self.defocus_disk_v = self.v * vec3.splat(defocus_radius);
     }
 
+    // Shared state for one parallel render: every worker pulls the next
+    // unclaimed scanline off `next_row` and writes only into that row's slice of
+    // `pixels`, so no two workers ever touch the same pixel.
+    const Job = struct {
+        cam: *const Camera,
+        world: hittable_list.HittableList,
+        pixels: []vec3.Color,
+        next_row: std.atomic.Value(u32),
+        rows_left: std.atomic.Value(u32),
+    };
+
     // Renders the whole image to `stdout` in PPM format, writing progress to
     // `stderr`. For each pixel, fires `samples_per_pixel` rays through slightly
     // jittered points within that pixel and averages the resulting colors —
     // this random supersampling is what smooths out jagged edges (antialiasing)
     // instead of every pixel being a single hard sample.
-    pub fn render(self: *Camera, world: hittable_list.HittableList, stdout: *std.Io.Writer, stderr: *std.Io.Writer) !void {
+    //
+    // Scanlines are rendered in parallel (see renderRows) into a full-image
+    // buffer, then written out in order once everything is done — PPM is
+    // positional, so the pixels can't be streamed out of order.
+    pub fn render(
+        self: *Camera,
+        io: std.Io,
+        gpa: std.mem.Allocator,
+        world: hittable_list.HittableList,
+        stdout: *std.Io.Writer,
+        stderr: *std.Io.Writer,
+    ) !void {
         self.initialize();
 
-        try stdout.print("P3\n{} {}\n255\n", .{ self.image_width, self.image_height });
+        const pixels = try gpa.alloc(vec3.Color, self.image_width * self.image_height);
+        defer gpa.free(pixels);
 
-        for (0..self.image_height) |j| {
-            try stderr.print("\rScanlines remaining: {} ", .{self.image_height - j});
-            try stderr.flush();
-            for (0..self.image_width) |i| {
-                var pixel_color = vec3.zero;
-                for (0..self.samples_per_pixel) |_| {
-                    pixel_color += rayColor(self.getRay(i, j), self.max_depth, world);
-                }
-                // Average the samples (multiply by 1/N) rather than sum them,
-                // so the final brightness doesn't scale with sample count.
-                try color.writeColor(stdout, pixel_color * vec3.splat(self.pixel_samples_scale));
-            }
+        var job: Job = .{
+            .cam = self,
+            .world = world,
+            .pixels = pixels,
+            .next_row = .init(0),
+            .rows_left = .init(self.image_height),
+        };
+
+        // One worker per core, minus one because this thread renders rows too —
+        // and it's the only one that touches `stderr`, so the progress log needs
+        // no synchronization. `concurrent` (not `async`) because these are
+        // CPU-bound: a task that doesn't get its own thread is worthless here.
+        const cpus = std.Thread.getCpuCount() catch 1;
+        var group: std.Io.Group = .init;
+        defer group.cancel(io); // no-op after a successful await; cleans up on error
+        for (1..@min(cpus, self.image_height)) |_| {
+            group.concurrent(io, renderRows, .{ &job, null }) catch break;
         }
+        renderRows(&job, stderr);
+        try group.await(io);
+
+        try stdout.print("P3\n{} {}\n255\n", .{ self.image_width, self.image_height });
+        for (pixels) |c| try color.writeColor(stdout, c);
         try stdout.flush();
         try stderr.print("\rDone.                    \n", .{});
         try stderr.flush();
+    }
+
+    // Worker loop: claim scanlines until there are none left. `stderr` is
+    // non-null for exactly one worker, which reports progress for all of them.
+    fn renderRows(job: *Job, stderr: ?*std.Io.Writer) void {
+        const self = job.cam;
+        while (true) {
+            const j = job.next_row.fetchAdd(1, .monotonic);
+            if (j >= self.image_height) return;
+
+            // Seed from the row index so a scanline renders identically no
+            // matter which worker claims it (see util.seedRandom). The odd
+            // constant is the golden-ratio mixer, to spread consecutive row
+            // indices across distant parts of the seed space.
+            util.seedRandom(0x9E3779B97F4A7C15 *% (@as(u64, j) + 1));
+
+            const row = job.pixels[j * self.image_width ..][0..self.image_width];
+            for (row, 0..) |*pixel, i| {
+                var pixel_color = vec3.zero;
+                for (0..self.samples_per_pixel) |_| {
+                    pixel_color += rayColor(self.getRay(i, j), self.max_depth, job.world);
+                }
+                // Average the samples (multiply by 1/N) rather than sum them,
+                // so the final brightness doesn't scale with sample count.
+                pixel.* = pixel_color * vec3.splat(self.pixel_samples_scale);
+            }
+
+            const left = job.rows_left.fetchSub(1, .monotonic) - 1;
+            if (stderr) |w| {
+                w.print("\rScanlines remaining: {} ", .{left}) catch {};
+                w.flush() catch {};
+            }
+        }
     }
 
     // Decides the color a single ray sees: the color of whatever it hits, or a

@@ -4,17 +4,25 @@ const std = @import("std");
 // between runs — handy while developing/debugging, at the cost of every run
 // producing the exact same antialiasing jitter pattern.
 //
+// `threadlocal` because camera.render() farms scanlines out to worker threads:
+// each one gets its own independent stream instead of racing on a shared one.
+// Reproducibility survives because render() calls seedRandom() per scanline, so
+// a row's samples don't depend on which worker picked it up.
+//
 // `prng.random()` is deliberately called per-use rather than cached in a
 // container-level `const`: caching it would force the compiler to take the
 // address of this mutable global at comptime, which happens to work today but
 // breaks confusingly the moment the global moves or becomes const.
-var prng = std.Random.DefaultPrng.init(29);
+threadlocal var prng = std.Random.DefaultPrng.init(29);
+
+// Restarts this thread's random stream from `s`. See the note above: the
+// renderer uses it to make each scanline's samples a function of the row index
+// alone.
+pub fn seedRandom(s: u64) void {
+    prng = .init(s);
+}
 
 // Uniform random f64 in [0, 1).
-//
-// ponytail: one global PRNG, so the renderer has to stay single-threaded.
-// Give each worker its own DefaultPrng (seeded per row) if render() is ever
-// parallelised.
 pub fn randomDouble() f64 {
     return prng.random().float(f64);
 }
