@@ -9,12 +9,39 @@ const util = @import("util.zig");
 // pixel, fires several randomly-jittered rays (antialiasing) through the world
 // and averages what they see. Configure the public fields, then call render() —
 // initialize() runs automatically as render()'s first step.
+// How a hit becomes a color. The book only reaches real materials in chapter
+// 10; every image before that uses one of the debug shadings here, which is
+// what lets one binary render all 23.
+pub const Shade = enum {
+    materials, // ask the surface's Material (chapter 10 onward)
+    flat_red, // any hit is red (image 3)
+    normals, // color by surface normal (images 4-6)
+    hemisphere, // uniform diffuse bounce (images 7-9)
+    lambertian, // cosine-weighted diffuse bounce (images 10-12)
+};
+
 pub const Camera = struct {
     // --- Public configuration, set by the caller (see main.zig) before render() ---
-    aspect_ratio: f64 = 1.0,
-    image_width: u32 = 100,
-    samples_per_pixel: u32 = 10, // rays per pixel, for antialiasing (see getRay)
-    max_depth: u32 = 10, // max ray bounces; caps recursion in rayColor()
+    // The defaults are the book's standard camera, so a scene only spells out
+    // what it changes.
+    aspect_ratio: f64 = 16.0 / 9.0,
+    image_width: u32 = 400,
+    samples_per_pixel: u32 = 100, // rays per pixel, for antialiasing (see getRay)
+    max_depth: u32 = 50, // max ray bounces; caps recursion in rayColor()
+
+    shade: Shade = .materials,
+    // How much light a surface keeps under the diffuse debug shadings. The book
+    // renders its gamut strip by sweeping this.
+    reflectance: f64 = 0.5,
+    // Where the t-window for a bounce starts. 0 reproduces the book's shadow
+    // acne (images 7 and 8) by letting a ray re-hit the surface it just left.
+    min_t: f64 = 0.001,
+    // False samples pixel centers, i.e. no antialiasing — the "before" half of
+    // the book's image 5.
+    jitter: bool = true,
+    // True skips gamma encoding, matching every image before the book
+    // introduces it (image 12).
+    linear: bool = false,
 
     vfov: f64 = 90, // vertical field of view, in degrees
     lookfrom: vec3.Point = vec3.zero,
@@ -138,7 +165,13 @@ pub const Camera = struct {
         // One worker per core, minus one because this thread renders rows too —
         // and it's the only one that touches `stderr`, so the progress log needs
         // no synchronization. `concurrent` (not `async`) because these are
-        // CPU-bound: a task that doesn't get its own thread is worthless here.
+        // CPU-bound: `async` is allowed to run a task inline on the caller, and
+        // `Io.Threaded` does exactly that once its pool is full.
+        //
+        // The core count is *our* cap, not the runtime's: `Io.Threaded` defaults
+        // `concurrent_limit` to `.unlimited`, so this loop would happily spawn a
+        // thread per scanline. More threads than cores would only add context
+        // switching — there's no I/O here to overlap with.
         const cpus = std.Thread.getCpuCount() catch 1;
         var group: std.Io.Group = .init;
         defer group.cancel(io); // no-op after a successful await; cleans up on error
@@ -149,7 +182,7 @@ pub const Camera = struct {
         try group.await(io);
 
         try stdout.print("P3\n{} {}\n255\n", .{ self.image_width, self.image_height });
-        for (pixels) |c| try color.writeColor(stdout, c);
+        for (pixels) |c| try color.writeColor(stdout, c, !self.linear);
         try stdout.flush();
         try stderr.print("\rDone.                    \n", .{});
         try stderr.flush();
@@ -173,7 +206,7 @@ pub const Camera = struct {
             for (row, 0..) |*pixel, i| {
                 var pixel_color = vec3.zero;
                 for (0..self.samples_per_pixel) |_| {
-                    pixel_color += rayColor(self.getRay(i, j), self.max_depth, job.world);
+                    pixel_color += self.rayColor(self.getRay(i, j), self.max_depth, job.world);
                 }
                 // Average the samples (multiply by 1/N) rather than sum them,
                 // so the final brightness doesn't scale with sample count.
@@ -192,16 +225,31 @@ pub const Camera = struct {
     // sky-blue-to-white gradient background if it hits nothing. `depth` counts
     // down remaining bounces; at 0 we stop recursing and return black, which
     // bounds the recursion at the cost of biasing deep paths dark.
-    fn rayColor(r_in: ray.Ray, depth: u32, world: hittable_list.HittableList) vec3.Color {
+    fn rayColor(self: *const Camera, r_in: ray.Ray, depth: u32, world: hittable_list.HittableList) vec3.Color {
         if (depth == 0) return vec3.zero;
 
-        // min = 0.001 (not 0) to avoid "shadow acne": floating-point error in
-        // rec.p can otherwise make the bounced ray re-hit the same surface at
-        // t ~ 0, which without a depth cap recurses forever.
-        if (world.hit(r_in, .{ .min = 0.001, .max = std.math.inf(f64) })) |rec| {
-            const s = rec.mat.scatter(r_in, rec) orelse return vec3.zero;
-            return s.attenuation * rayColor(s.ray, depth - 1, world);
-        }
+        // min_t defaults to 0.001 (not 0) to avoid "shadow acne": floating-point
+        // error in rec.p can otherwise make the bounced ray re-hit the same
+        // surface at t ~ 0, which without a depth cap recurses forever.
+        if (world.hit(r_in, .{ .min = self.min_t, .max = std.math.inf(f64) })) |rec| switch (self.shade) {
+            .flat_red => return vec3.init(1, 0, 0),
+            // Normal components run [-1, 1], so shift and halve to get a color.
+            .normals => return (rec.normal + vec3.splat(1)) * vec3.splat(0.5),
+            // The pre-material chapters bounce with a flat reflectance instead
+            // of asking the surface what it is.
+            .hemisphere, .lambertian => {
+                const direction = if (self.shade == .hemisphere)
+                    vec3.randomOnHemisphere(rec.normal)
+                else
+                    rec.normal + vec3.randomUnitVector();
+                const bounce = ray.Ray{ .origin = rec.p, .direction = direction };
+                return vec3.splat(self.reflectance) * self.rayColor(bounce, depth - 1, world);
+            },
+            .materials => {
+                const s = rec.mat.scatter(r_in, rec) orelse return vec3.zero;
+                return s.attenuation * self.rayColor(s.ray, depth - 1, world);
+            },
+        };
 
         // Background gradient: blend white -> light blue based on the ray's
         // y-direction, so straight-down rays are white and straight-up rays are
@@ -216,7 +264,7 @@ pub const Camera = struct {
     // jitter so repeated calls for the same pixel sample slightly different
     // points within it (see render()'s sample loop).
     fn getRay(self: Camera, i: usize, j: usize) ray.Ray {
-        const offset = sampleSquare();
+        const offset = if (self.jitter) sampleSquare() else vec3.zero;
         const pixel_sample = self.pixel00_loc +
             self.pixel_delta_u * vec3.splat(@as(f64, @floatFromInt(i)) + offset[0]) +
             self.pixel_delta_v * vec3.splat(@as(f64, @floatFromInt(j)) + offset[1]);
@@ -287,11 +335,12 @@ test "rayColor returns the sky gradient when nothing is hit" {
     var world = hittable_list.HittableList.init(std.testing.allocator);
     defer world.deinit();
 
-    const up = Camera.rayColor(.{ .origin = vec3.zero, .direction = vec3.init(0, 1, 0) }, 10, world);
+    const cam = Camera{};
+    const up = cam.rayColor(.{ .origin = vec3.zero, .direction = vec3.init(0, 1, 0) }, 10, world);
     try std.testing.expectApproxEqAbs(@as(f64, 0.5), up[0], 1e-12); // full blue end
-    const down = Camera.rayColor(.{ .origin = vec3.zero, .direction = vec3.init(0, -1, 0) }, 10, world);
+    const down = cam.rayColor(.{ .origin = vec3.zero, .direction = vec3.init(0, -1, 0) }, 10, world);
     try std.testing.expectEqual(vec3.splat(1), down); // full white end
 
     // Out of bounces contributes no light at all.
-    try std.testing.expectEqual(vec3.zero, Camera.rayColor(.{ .origin = vec3.zero, .direction = vec3.init(0, 1, 0) }, 0, world));
+    try std.testing.expectEqual(vec3.zero, cam.rayColor(.{ .origin = vec3.zero, .direction = vec3.init(0, 1, 0) }, 0, world));
 }
