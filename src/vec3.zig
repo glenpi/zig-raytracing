@@ -84,6 +84,13 @@ pub fn randomUnitVector() Vec3 {
     }
 }
 
+// A random unit vector in the hemisphere facing `normal`. This is the book's
+// first, uniform diffuse bounce (images 7 to 9), before cosine weighting.
+pub fn randomOnHemisphere(normal: Vec3) Vec3 {
+    const v = randomUnitVector();
+    return if (dot(v, normal) > 0) v else -v;
+}
+
 pub fn random() Vec3 {
     return init(util.randomDouble(), util.randomDouble(), util.randomDouble());
 }

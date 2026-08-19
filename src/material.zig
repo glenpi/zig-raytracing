@@ -67,6 +67,10 @@ pub const Metal = struct {
 // instead of refract (real glass partially reflects at glancing angles).
 pub const Dielectric = struct {
     refraction_index: f64,
+    // The book's first, deliberately wrong dielectric (images 15 and 16): every
+    // ray refracts, with no total internal reflection and no Fresnel term, so
+    // grazing rays that should mirror pass straight through instead.
+    always_refract: bool = false,
 
     pub fn scatter(self: Dielectric, r_in: ray.Ray, rec: hittable.HitRecord) ?Scatter {
         // Light bends more going from a denser to a less dense medium, so the
@@ -82,7 +86,9 @@ pub const Dielectric = struct {
         // reflection) — when that happens, or when Schlick's approximation says
         // reflection is more likely at this angle, reflect instead of refract.
         const cannot_refract = ri * sin_theta > 1.0;
-        const direction = if (cannot_refract or reflectance(cos_theta, ri) > util.randomDouble())
+        const must_reflect = (cannot_refract or reflectance(cos_theta, ri) > util.randomDouble()) and
+            !self.always_refract;
+        const direction = if (must_reflect)
             vec3.reflect(unit_direction, rec.normal)
         else
             vec3.refract(unit_direction, rec.normal, ri);
